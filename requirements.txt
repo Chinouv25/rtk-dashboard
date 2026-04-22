@@ -1,0 +1,6 @@
+streamlit==1.56.0
+pandas
+plotly
+folium
+streamlit-folium
+numpy
