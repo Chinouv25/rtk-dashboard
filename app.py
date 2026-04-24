@@ -97,7 +97,7 @@ if archivos:
         if f.name not in st.session_state.recorridos:
             st.session_state.recorridos[f.name] = load_csv(f.read(), f.name)
 
-# Lista de recorridos en sidebar + eliminar
+# Lista recorridos en sidebar + eliminar
 with st.sidebar:
     if st.session_state.recorridos:
         st.divider()
@@ -125,7 +125,7 @@ if not st.session_state.recorridos:
 recorridos_activos = st.session_state.recorridos
 
 # ══════════════════════════════════════════════════════════
-# MÉTRICAS SUPERIORES — un bloque por track
+# MÉTRICAS SUPERIORES
 # ══════════════════════════════════════════════════════════
 st.subheader("📋 Resumen de recorridos")
 cols_met = st.columns(len(recorridos_activos))
@@ -138,9 +138,9 @@ for i, (nombre, df_rec) in enumerate(recorridos_activos.items()):
             f'<b>{nombre.replace(".csv","")}</b></div>',
             unsafe_allow_html=True
         )
-        st.metric("Vel. máx",     f"{df_rec['vel_kmh'].max():.1f} km/h")
-        st.metric("Vel. promedio", f"{df_rec['vel_kmh'].mean():.1f} km/h")
-        st.metric("Tiempo total",  segundos_a_str(t_total))
+        st.metric("Vel. máx",      f"{df_rec['vel_kmh'].max():.2f} km/h")
+        st.metric("Vel. promedio",  f"{df_rec['vel_kmh'].mean():.2f} km/h")
+        st.metric("Tiempo total",   segundos_a_str(t_total))
 
 st.divider()
 
@@ -242,7 +242,7 @@ if st.session_state.linea_fin:
 
 colors_gc = ["#FF6B6B","#4ECDC4","#FFE66D","#A8E6CF","#FF8B94","#B8B8FF"]
 for idx, gc in enumerate(st.session_state.geocercas):
-    color = colors_gc[idx % len(colors_gc)]
+    color  = colors_gc[idx % len(colors_gc)]
     df_ref = list(gc["segmentos"].values())[0]
     if len(df_ref) > 1:
         folium.PolyLine(
@@ -277,7 +277,7 @@ Draw(export=False, draw_options={
 map_data = st_folium(m, width="100%", height=500, key="main_map",
                      returned_objects=["last_active_drawing"])
 
-# ── Captura de líneas — fix segunda línea ─────────────────
+# ── Captura de líneas ─────────────────────────────────────
 if map_data and map_data.get("last_active_drawing"):
     geom = map_data["last_active_drawing"].get("geometry", {})
     if geom.get("type") == "LineString":
@@ -314,12 +314,11 @@ if (st.session_state.linea_inicio is not None and
         nombre: segmento_entre_lineas(df_rec, linea_ini_sh, linea_fin_sh)
         for nombre, df_rec in recorridos_activos.items()
     }
-    total_pts = sum(len(s) for s in segmentos_preview.values())
+    total_pts    = sum(len(s) for s in segmentos_preview.values())
     tiempos_prev = {n: tiempo_zona(s) for n,s in segmentos_preview.items()}
     st.success(
         f"Segmento detectado en {len(segmentos_preview)} recorrido(s) — "
-        f"{total_pts} puntos | "
-        f"Tiempos: " +
+        f"{total_pts} puntos | Tiempos: " +
         ", ".join([f"{n.replace('.csv','')}: {segundos_a_str(t)}"
                    for n,t in tiempos_prev.items()])
     )
@@ -390,40 +389,37 @@ if st.session_state.analizar and st.session_state.geocercas:
         for rec_nombre, df_seg in gc["segmentos"].items():
             t_zona = tiempo_zona(df_seg)
             filas.append({
-                "Recorrido":    rec_nombre.replace(".csv",""),
-                "Puntos":       len(df_seg),
-                "Tiempo zona":  segundos_a_str(t_zona),
-                "Vel máx real": round(df_seg["vel_kmh"].max(),1) if len(df_seg) else "-",
-                "Vel mín real": round(df_seg["vel_kmh"].min(),1) if len(df_seg) else "-",
-                "Vel máx obj":  gc["vel_max_obj"],
-                "Vel mín obj":  gc["vel_min_obj"],
-                "_t_zona_s":    t_zona,
+                "Recorrido":     rec_nombre.replace(".csv",""),
+                "Tiempo zona":   segundos_a_str(t_zona),
+                "Vel máx real":  round(df_seg["vel_kmh"].max(), 2) if len(df_seg) else "-",
+                "Vel mín real":  round(df_seg["vel_kmh"].min(), 2) if len(df_seg) else "-",
+                "Vel prom real": round(df_seg["vel_kmh"].mean(), 2) if len(df_seg) else "-",
+                "Vel máx obj":   gc["vel_max_obj"],
+                "Vel mín obj":   gc["vel_min_obj"],
+                "_t_zona_s":     t_zona,
             })
 
         df_tabla = pd.DataFrame(filas)
 
         def highlight(row):
-            styles = ["","",""]
+            styles = [""] * len(row)
             for col, obj in [
                 ("Vel máx real", gc["vel_max_obj"]),
                 ("Vel mín real", gc["vel_min_obj"]),
             ]:
-                val = row[col]
-                if val != "-":
-                    diff  = abs(float(val) - obj)
-                    color = (
+                if col in row.index and row[col] != "-":
+                    diff = abs(float(row[col]) - obj)
+                    idx  = row.index.tolist().index(col)
+                    styles[idx] = (
                         "background-color:#1a4a1a" if diff <= obj*0.05
                         else "background-color:#4a3a0a" if diff <= obj*0.15
                         else "background-color:#4a1a1a"
                     )
-                    styles.append(color)
-                else:
-                    styles.append("")
-            styles += ["",""]
             return styles
 
         st.dataframe(
-            df_tabla.drop(columns=["_t_zona_s"]).style.apply(highlight, axis=1),
+            df_tabla.style.apply(highlight, axis=1)
+                          .hide(subset=["_t_zona_s"], axis="columns"),
             use_container_width=True
         )
         st.caption("🟢 ≤5% del objetivo  |  🟡 ≤15%  |  🔴 Fuera de rango")
@@ -434,121 +430,111 @@ if st.session_state.analizar and st.session_state.geocercas:
     # ══════════════════════════════════════════════════════
     st.subheader("🏆 Benchmark entre recorridos")
 
-    # Datos globales por track
     bench_rows = []
     for i, (nombre, df_rec) in enumerate(recorridos_activos.items()):
         t_total = tiempo_track(df_rec)
         bench_rows.append({
-            "Recorrido":   nombre.replace(".csv",""),
-            "nombre_raw":  nombre,
-            "Vel máx":     round(df_rec["vel_kmh"].max(), 1),
-            "Vel prom":    round(df_rec["vel_kmh"].mean(), 1),
-            "Tiempo total":segundos_a_str(t_total),
-            "_t_total_s":  t_total,
-            "color":       TRACK_COLORS[i % len(TRACK_COLORS)],
+            "Recorrido":    nombre.replace(".csv",""),
+            "nombre_raw":   nombre,
+            "Vel máx":      round(df_rec["vel_kmh"].max(), 2),
+            "Vel prom":     round(df_rec["vel_kmh"].mean(), 2),
+            "Tiempo total": segundos_a_str(t_total),
+            "_t_total_s":   t_total,
+            "color":        TRACK_COLORS[i % len(TRACK_COLORS)],
         })
 
     df_bench = pd.DataFrame(bench_rows)
-
-    # Referencia vel máx — el más rápido
-    ref_vel = df_bench.loc[df_bench["Vel máx"].idxmax()]
-    # Referencia tiempo — el más rápido (menor tiempo)
+    ref_vel  = df_bench.loc[df_bench["Vel máx"].idxmax()]
     ref_time = df_bench.loc[df_bench["_t_total_s"].idxmin()]
 
     col_b1, col_b2 = st.columns(2)
 
     with col_b1:
         st.markdown("#### Por velocidad máxima")
-        st.success(f"🥇 Referencia: **{ref_vel['Recorrido']}** — "
-                   f"{ref_vel['Vel máx']} km/h")
+        st.success(f"🥇 Referencia: **{ref_vel['Recorrido']}** — {ref_vel['Vel máx']} km/h")
+
         filas_vel = []
         for _, row in df_bench.iterrows():
-            diff = row["Vel máx"] - ref_vel["Vel máx"]
+            diff = round(row["Vel máx"] - ref_vel["Vel máx"], 2)
             filas_vel.append({
                 "Recorrido": row["Recorrido"],
                 "Vel máx":   row["Vel máx"],
-                "Δ vs ref":  f"{diff:+.1f} km/h",
+                "Δ vs ref":  f"{diff:+.2f} km/h",
                 "_diff":     diff,
             })
         df_vel = pd.DataFrame(filas_vel)
 
         def color_diff_vel(row):
-            d = row["_diff"]
-            if d == 0:
-                return ["","","background-color:#1a4a1a",""]
-            elif d > 0:
-                return ["","","background-color:#1a4a1a",""]
-            elif d >= -3:
-                return ["","","background-color:#4a3a0a",""]
-            else:
-                return ["","","background-color:#4a1a1a",""]
+            styles = [""] * len(row)
+            d   = row["_diff"]
+            idx = row.index.tolist().index("Δ vs ref")
+            styles[idx] = (
+                "background-color:#1a4a1a" if d == 0
+                else "background-color:#4a3a0a" if d >= -3
+                else "background-color:#4a1a1a"
+            )
+            return styles
 
         st.dataframe(
-            df_vel.drop(columns=["_diff"]).style.apply(color_diff_vel, axis=1),
+            df_vel.style.apply(color_diff_vel, axis=1)
+                        .hide(subset=["_diff"], axis="columns"),
             use_container_width=True
         )
 
-        fig_vel_bench = go.Figure()
-        for _, row in df_bench.iterrows():
-            fig_vel_bench.add_trace(go.Bar(
-                name=row["Recorrido"],
-                x=[row["Recorrido"]],
-                y=[row["Vel máx"]],
-                marker_color=row["color"],
-            ))
+        fig_vel_bench = go.Figure([
+            go.Bar(name=row["Recorrido"], x=[row["Recorrido"]],
+                   y=[row["Vel máx"]], marker_color=row["color"])
+            for _, row in df_bench.iterrows()
+        ])
         fig_vel_bench.update_layout(
-            title="Velocidad máxima por recorrido",
-            height=280, showlegend=False,
-            margin=dict(t=40,b=20),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
+            title="Velocidad máxima por recorrido", height=280,
+            showlegend=False, margin=dict(t=40,b=20),
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             yaxis_title="km/h"
         )
         st.plotly_chart(fig_vel_bench, use_container_width=True)
 
     with col_b2:
         st.markdown("#### Por tiempo total")
-        st.success(f"🥇 Referencia: **{ref_time['Recorrido']}** — "
-                   f"{ref_time['Tiempo total']}")
+        st.success(f"🥇 Referencia: **{ref_time['Recorrido']}** — {ref_time['Tiempo total']}")
+
         filas_time = []
         for _, row in df_bench.iterrows():
-            diff_s = row["_t_total_s"] - ref_time["_t_total_s"]
+            diff_s = round(row["_t_total_s"] - ref_time["_t_total_s"], 2)
             filas_time.append({
-                "Recorrido":   row["Recorrido"],
-                "Tiempo total":row["Tiempo total"],
-                "Δ vs ref":    f"{diff_s:+.2f} s",
-                "_diff_s":     diff_s,
+                "Recorrido":    row["Recorrido"],
+                "Tiempo total": row["Tiempo total"],
+                "Δ vs ref":     f"{diff_s:+.2f} s",
+                "_diff_s":      diff_s,
             })
         df_time = pd.DataFrame(filas_time)
 
         def color_diff_time(row):
-            d = row["_diff_s"]
-            if d == 0:
-                return ["","","background-color:#1a4a1a",""]
-            elif d <= 1:
-                return ["","","background-color:#4a3a0a",""]
-            else:
-                return ["","","background-color:#4a1a1a",""]
+            styles = [""] * len(row)
+            d   = row["_diff_s"]
+            idx = row.index.tolist().index("Δ vs ref")
+            styles[idx] = (
+                "background-color:#1a4a1a" if d == 0
+                else "background-color:#4a3a0a" if d <= 1
+                else "background-color:#4a1a1a"
+            )
+            return styles
 
         st.dataframe(
-            df_time.drop(columns=["_diff_s"]).style.apply(color_diff_time, axis=1),
+            df_time.style.apply(color_diff_time, axis=1)
+                         .hide(subset=["_diff_s"], axis="columns"),
             use_container_width=True
         )
 
-        fig_time_bench = go.Figure()
-        for _, row in df_bench.iterrows():
-            fig_time_bench.add_trace(go.Bar(
-                name=row["Recorrido"],
-                x=[row["Recorrido"]],
-                y=[row["_t_total_s"]],
-                marker_color=row["color"],
-            ))
+        fig_time_bench = go.Figure([
+            go.Bar(name=row["Recorrido"], x=[row["Recorrido"]],
+                   y=[row["_t_total_s"]], marker_color=row["color"])
+            for _, row in df_bench.iterrows()
+        ])
         fig_time_bench.update_layout(
-            title="Tiempo total por recorrido",
-            height=280, showlegend=False,
-            margin=dict(t=40,b=20),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
+            title="Tiempo total por recorrido", height=280,
+            showlegend=False, margin=dict(t=40,b=20),
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             yaxis_title="segundos"
         )
         st.plotly_chart(fig_time_bench, use_container_width=True)
@@ -558,41 +544,46 @@ if st.session_state.analizar and st.session_state.geocercas:
         st.markdown("#### Benchmark por zona")
         for gc in st.session_state.geocercas:
             st.markdown(f"**{gc['nombre']}**")
-            filas_z = []
-            tiempos_z = {}
-            for rec_nombre, df_seg in gc["segmentos"].items():
-                tz = tiempo_zona(df_seg)
-                tiempos_z[rec_nombre] = tz
+            tiempos_z  = {n: tiempo_zona(s) for n,s in gc["segmentos"].items()}
             ref_t_zona = min(tiempos_z.values()) if tiempos_z else 0
+            vel_max_zona = max(
+                (df_seg["vel_kmh"].max() for df_seg in gc["segmentos"].values()
+                 if len(df_seg)), default=0
+            )
+            filas_z = []
             for rec_nombre, df_seg in gc["segmentos"].items():
                 tz     = tiempos_z[rec_nombre]
-                diff_z = tz - ref_t_zona
+                diff_z = round(tz - ref_t_zona, 2)
+                diff_v = round(df_seg["vel_kmh"].max() - vel_max_zona, 2) \
+                         if len(df_seg) else "-"
                 filas_z.append({
-                    "Recorrido":  rec_nombre.replace(".csv",""),
-                    "Puntos":     len(df_seg),
-                    "Tiempo zona":segundos_a_str(tz),
-                    "Δ tiempo":   f"{diff_z:+.2f} s",
-                    "Vel máx":    round(df_seg["vel_kmh"].max(),1) if len(df_seg) else "-",
-                    "Δ vel máx":  f"{(df_seg['vel_kmh'].max() - max(d['vel_kmh'].max() for d in gc['segmentos'].values())):+.1f} km/h" if len(df_seg) else "-",
-                    "_diff_z":    diff_z,
+                    "Recorrido":   rec_nombre.replace(".csv",""),
+                    "Tiempo zona": segundos_a_str(tz),
+                    "Δ tiempo":    f"{diff_z:+.2f} s",
+                    "Vel máx":     round(df_seg["vel_kmh"].max(), 2) if len(df_seg) else "-",
+                    "Vel prom":    round(df_seg["vel_kmh"].mean(), 2) if len(df_seg) else "-",
+                    "Δ vel máx":   f"{diff_v:+.2f} km/h" if diff_v != "-" else "-",
+                    "_diff_z":     diff_z,
                 })
             df_zona_bench = pd.DataFrame(filas_z)
 
             def color_zona(row):
-                d = row["_diff_z"]
-                base = ["","",""]
-                if d == 0:
-                    base.append("background-color:#1a4a1a")
-                elif d <= 0.5:
-                    base.append("background-color:#4a3a0a")
-                else:
-                    base.append("background-color:#4a1a1a")
-                return base + ["","",""]
+                styles = [""] * len(row)
+                d   = row["_diff_z"]
+                idx = row.index.tolist().index("Δ tiempo")
+                styles[idx] = (
+                    "background-color:#1a4a1a" if d == 0
+                    else "background-color:#4a3a0a" if d <= 0.5
+                    else "background-color:#4a1a1a"
+                )
+                return styles
 
             st.dataframe(
-                df_zona_bench.drop(columns=["_diff_z"]).style.apply(color_zona, axis=1),
+                df_zona_bench.style.apply(color_zona, axis=1)
+                                   .hide(subset=["_diff_z"], axis="columns"),
                 use_container_width=True
             )
+            st.markdown("---")
 
 st.divider()
 
@@ -601,7 +592,7 @@ st.divider()
 # ══════════════════════════════════════════════════════════
 st.subheader("📈 Series temporales")
 
-rec_sel  = st.selectbox(
+rec_sel = st.selectbox(
     "Recorrido a graficar:",
     list(recorridos_activos.keys()),
     format_func=lambda x: x.replace(".csv",""),
