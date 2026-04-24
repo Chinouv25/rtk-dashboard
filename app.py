@@ -41,13 +41,13 @@ def tiempo_zona(df_seg):
         return 0.0
     return df_seg["timestamp_s"].iloc[-1] - df_seg["timestamp_s"].iloc[0]
 
-def r2(v):
+def fmt(v):
+    """Formatea un número a exactamente 2 decimales como string."""
     try:
-        return round(float(v), 2)
+        return f"{float(v):.2f}"
     except:
-        return v
+        return str(v)
 
-@st.cache_data
 def load_csv(file_content, filename):
     import io
     df = pd.read_csv(io.BytesIO(file_content))
@@ -96,6 +96,30 @@ def val_to_color_rg(v, vmin, vmax):
                 int(c0[2]+f*(c1[2]-c0[2])))
     return "#32c850"
 
+def aplicar_estilo_diff(df_display, col_delta, ref_val=0,
+                         umbrales=(0, 3)):
+    """
+    Colorea col_delta según diferencia.
+    No depende de columnas ocultas — lee directamente la celda.
+    """
+    def _style(row):
+        styles = [""] * len(row)
+        idx = row.index.tolist().index(col_delta)
+        try:
+            val_str = row[col_delta].replace("+","").replace(" km/h","") \
+                                    .replace(" s","")
+            d = float(val_str)
+        except:
+            return styles
+        if d == 0:
+            styles[idx] = "background-color:#1a4a1a"
+        elif abs(d) <= umbrales[1]:
+            styles[idx] = "background-color:#4a3a0a"
+        else:
+            styles[idx] = "background-color:#4a1a1a"
+        return styles
+    return _style
+
 TRACK_COLORS = ["#4ECDC4","#FF6B6B","#FFE66D","#A8E6CF","#B8B8FF","#FF8B94"]
 
 # ── Sidebar ───────────────────────────────────────────────
@@ -112,13 +136,26 @@ with st.sidebar:
             "acel_mag":"Aceleración (m/s²)","inc_mag":"Inclinación (°)"
         }[x]
     )
-    unit_map  = {"vel_kmh":"km/h","elevation_m":"m","acel_mag":"m/s²","inc_mag":"°"}
-    label_map = {"vel_kmh":"Vel","elevation_m":"Alt","acel_mag":"Acel","inc_mag":"Incl"}
+    unit_map  = {"vel_kmh":"km/h","elevation_m":"m",
+                 "acel_mag":"m/s²","inc_mag":"°"}
+    label_map = {"vel_kmh":"Vel","elevation_m":"Alt",
+                 "acel_mag":"Acel","inc_mag":"Incl"}
 
+# Procesar archivos — sin cache para evitar mezcla entre sesiones
+nombres_subidos = {f.name for f in archivos} if archivos else set()
+
+# Eliminar recorridos que ya no están subidos
+nombres_a_borrar = [n for n in st.session_state.recorridos
+                    if n not in nombres_subidos]
+for n in nombres_a_borrar:
+    del st.session_state.recorridos[n]
+
+# Agregar nuevos
 if archivos:
     for f in archivos:
         if f.name not in st.session_state.recorridos:
-            st.session_state.recorridos[f.name] = load_csv(f.read(), f.name)
+            contenido = f.read()
+            st.session_state.recorridos[f.name] = load_csv(contenido, f.name)
 
 with st.sidebar:
     if st.session_state.recorridos:
@@ -129,7 +166,8 @@ with st.sidebar:
             color = TRACK_COLORS[i % len(TRACK_COLORS)]
             col1, col2 = st.columns([3,1])
             col1.markdown(
-                f'<span style="color:{color};">■</span> {nombre.replace(".csv","")}',
+                f'<span style="color:{color};">■</span> '
+                f'{nombre.replace(".csv","")}',
                 unsafe_allow_html=True)
             if col2.button("✕", key=f"del_rec_{nombre}"):
                 to_delete.append(nombre)
@@ -155,9 +193,9 @@ for i, (nombre, df_rec) in enumerate(recorridos_activos.items()):
             f'<div style="border-left:4px solid {color};padding-left:10px;">'
             f'<b>{nombre.replace(".csv","")}</b></div>',
             unsafe_allow_html=True)
-        st.metric("Vel. máx",     f"{df_rec['vel_kmh'].max():.2f} km/h")
-        st.metric("Vel. promedio", f"{df_rec['vel_kmh'].mean():.2f} km/h")
-        st.metric("Tiempo total",  segundos_a_str(tiempo_track(df_rec)))
+        st.metric("Vel. máx",      fmt(df_rec["vel_kmh"].max()) + " km/h")
+        st.metric("Vel. promedio",  fmt(df_rec["vel_kmh"].mean()) + " km/h")
+        st.metric("Tiempo total",   segundos_a_str(tiempo_track(df_rec)))
 
 st.divider()
 
@@ -186,7 +224,6 @@ folium.TileLayer(
 var_label = label_map[color_var]
 var_unit  = unit_map[color_var]
 
-# Tracks
 for rec_idx, (nombre, df_rec) in enumerate(recorridos_activos.items()):
     vals = df_rec[color_var].values
     vmin, vmax = vals.min(), vals.max()
@@ -210,16 +247,15 @@ for rec_idx, (nombre, df_rec) in enumerate(recorridos_activos.items()):
         ).add_to(m)
     folium.CircleMarker(
         [df_rec["lat"].iloc[0], df_rec["lon"].iloc[0]],
-        radius=7, color="#22c55e", fill=True, fill_color="#22c55e",
-        tooltip=f"<b>Inicio: {rec_label}</b>"
+        radius=7, color="#22c55e", fill=True,
+        fill_color="#22c55e", tooltip=f"<b>Inicio: {rec_label}</b>"
     ).add_to(m)
     folium.CircleMarker(
         [df_rec["lat"].iloc[-1], df_rec["lon"].iloc[-1]],
-        radius=7, color="#ef4444", fill=True, fill_color="#ef4444",
-        tooltip=f"<b>Fin: {rec_label}</b>"
+        radius=7, color="#ef4444", fill=True,
+        fill_color="#ef4444", tooltip=f"<b>Fin: {rec_label}</b>"
     ).add_to(m)
 
-# Líneas en captura
 if st.session_state.linea_inicio:
     folium.PolyLine(
         [[c[1],c[0]] for c in st.session_state.linea_inicio],
@@ -231,7 +267,6 @@ if st.session_state.linea_fin:
         color="#ef4444", weight=4, tooltip="Línea fin"
     ).add_to(m)
 
-# Zonas guardadas
 colors_gc = ["#FF6B6B","#4ECDC4","#FFE66D","#A8E6CF","#FF8B94","#B8B8FF"]
 for idx, gc in enumerate(st.session_state.geocercas):
     color  = colors_gc[idx % len(colors_gc)]
@@ -255,34 +290,27 @@ for idx, gc in enumerate(st.session_state.geocercas):
         folium.Marker(
             [mid["lat"], mid["lon"]],
             icon=folium.DivIcon(
-                html=f'<div style="font-size:11px;font-weight:bold;color:{color};'
-                     f'background:rgba(0,0,0,0.7);padding:2px 6px;'
-                     f'border-radius:4px;white-space:nowrap;">'
-                     f'{gc["nombre"]}</div>'
+                html=f'<div style="font-size:11px;font-weight:bold;'
+                     f'color:{color};background:rgba(0,0,0,0.7);'
+                     f'padding:2px 6px;border-radius:4px;'
+                     f'white-space:nowrap;">{gc["nombre"]}</div>'
             )
         ).add_to(m)
 
-# Leyenda gradiente en el mapa
+# Leyenda — solo gradiente, sin datos de archivos
 legend_html = f"""
 <div style="position:fixed;bottom:30px;right:10px;z-index:1000;
      background:rgba(0,0,0,0.75);padding:10px 14px;border-radius:8px;
-     font-size:12px;color:white;min-width:160px;">
+     font-size:12px;color:white;min-width:150px;">
   <b>{var_label} ({var_unit})</b><br>
   <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
-    <span>Bajo</span>
-    <div style="width:80px;height:10px;border-radius:4px;
+    <span style="font-size:10px;">Bajo</span>
+    <div style="width:90px;height:10px;border-radius:4px;
          background:linear-gradient(to right,#dc3232,#e6b400,#32c850);"></div>
-    <span>Alto</span>
+    <span style="font-size:10px;">Alto</span>
   </div>
-  <div style="display:flex;justify-content:space-between;font-size:10px;margin-top:2px;">
+</div>
 """
-for rec_nombre, df_rec in recorridos_activos.items():
-    vmin_r = df_rec[color_var].min()
-    vmax_r = df_rec[color_var].max()
-    legend_html += (f"<span style='color:#aaa;font-size:10px;'>"
-                    f"{rec_nombre.replace('.csv','')}: "
-                    f"{vmin_r:.2f}–{vmax_r:.2f} {var_unit}</span><br>")
-legend_html += "</div></div>"
 m.get_root().html.add_child(folium.Element(legend_html))
 
 Draw(export=False, draw_options={
@@ -293,7 +321,6 @@ Draw(export=False, draw_options={
 map_data = st_folium(m, width="100%", height=500, key="main_map",
                      returned_objects=["last_active_drawing"])
 
-# Captura líneas
 if map_data and map_data.get("last_active_drawing"):
     geom = map_data["last_active_drawing"].get("geometry", {})
     if geom.get("type") == "LineString":
@@ -323,7 +350,6 @@ st.subheader("➕ Registrar nueva zona")
 
 if (st.session_state.linea_inicio is not None and
         st.session_state.linea_fin is not None):
-
     li = linea_a_shapely(st.session_state.linea_inicio)
     lf = linea_a_shapely(st.session_state.linea_fin)
     segs_prev = {n: segmento_entre_lineas(df, li, lf)
@@ -377,24 +403,21 @@ if st.session_state.geocercas:
             col1, col2, col3 = st.columns([2,2,1])
             with col1:
                 nuevo_max = st.number_input(
-                    "Vel. máx obj (km/h)",
-                    0.0, 200.0, float(gc["vel_max_obj"]), 0.5,
-                    key=f"edit_max_{idx}"
-                )
+                    "Vel. máx obj (km/h)", 0.0, 200.0,
+                    float(gc["vel_max_obj"]), 0.5,
+                    key=f"edit_max_{idx}")
             with col2:
                 nuevo_min = st.number_input(
-                    "Vel. mín obj (km/h)",
-                    0.0, 200.0, float(gc["vel_min_obj"]), 0.5,
-                    key=f"edit_min_{idx}"
-                )
+                    "Vel. mín obj (km/h)", 0.0, 200.0,
+                    float(gc["vel_min_obj"]), 0.5,
+                    key=f"edit_min_{idx}")
             with col3:
-                st.write("")
-                st.write("")
-                if st.button("💾 Guardar", key=f"save_gc_{idx}"):
+                st.write(""); st.write("")
+                if st.button("💾", key=f"save_gc_{idx}"):
                     st.session_state.geocercas[idx]["vel_max_obj"] = nuevo_max
                     st.session_state.geocercas[idx]["vel_min_obj"] = nuevo_min
                     st.rerun()
-            if st.button("🗑️ Eliminar zona", key=f"del_gc_{idx}"):
+            if st.button("🗑️ Eliminar", key=f"del_gc_{idx}"):
                 st.session_state.geocercas.pop(idx)
                 st.rerun()
             st.markdown("---")
@@ -422,35 +445,35 @@ if st.session_state.analizar and st.session_state.geocercas:
             filas.append({
                 "Recorrido":     rec_nombre.replace(".csv",""),
                 "Tiempo zona":   segundos_a_str(tz),
-                "Vel máx real":  r2(df_seg["vel_kmh"].max()) if len(df_seg) else "-",
-                "Vel mín real":  r2(df_seg["vel_kmh"].min()) if len(df_seg) else "-",
-                "Vel prom real": r2(df_seg["vel_kmh"].mean()) if len(df_seg) else "-",
-                "Vel máx obj":   r2(gc["vel_max_obj"]),
-                "Vel mín obj":   r2(gc["vel_min_obj"]),
-                "_tz":           tz,
+                "Vel máx real":  fmt(df_seg["vel_kmh"].max()) if len(df_seg) else "-",
+                "Vel mín real":  fmt(df_seg["vel_kmh"].min()) if len(df_seg) else "-",
+                "Vel prom real": fmt(df_seg["vel_kmh"].mean()) if len(df_seg) else "-",
+                "Vel máx obj":   fmt(gc["vel_max_obj"]),
+                "Vel mín obj":   fmt(gc["vel_min_obj"]),
             })
         df_tabla = pd.DataFrame(filas)
 
-        def highlight(row):
+        def highlight_zona(row):
             styles = [""] * len(row)
             for col, obj in [
                 ("Vel máx real", gc["vel_max_obj"]),
                 ("Vel mín real", gc["vel_min_obj"]),
             ]:
                 if col in row.index and row[col] != "-":
-                    diff = abs(float(row[col]) - obj)
-                    i    = row.index.tolist().index(col)
-                    styles[i] = (
-                        "background-color:#1a4a1a" if diff <= obj*0.05
-                        else "background-color:#4a3a0a" if diff <= obj*0.15
-                        else "background-color:#4a1a1a"
-                    )
+                    try:
+                        diff = abs(float(row[col]) - obj)
+                        i    = row.index.tolist().index(col)
+                        styles[i] = (
+                            "background-color:#1a4a1a" if diff <= obj*0.05
+                            else "background-color:#4a3a0a" if diff <= obj*0.15
+                            else "background-color:#4a1a1a"
+                        )
+                    except:
+                        pass
             return styles
 
         st.dataframe(
-            df_tabla.drop(columns=["_tz"])
-                    .style.apply(highlight, axis=1)
-                    .hide(axis="index"),
+            df_tabla.style.apply(highlight_zona, axis=1).hide(axis="index"),
             use_container_width=True
         )
         st.caption("🟢 ≤5% objetivo  |  🟡 ≤15%  |  🔴 Fuera de rango")
@@ -463,80 +486,83 @@ if st.session_state.analizar and st.session_state.geocercas:
     for i, (nombre, df_rec) in enumerate(recorridos_activos.items()):
         bench_rows.append({
             "Recorrido":    nombre.replace(".csv",""),
-            "Vel máx":      r2(df_rec["vel_kmh"].max()),
-            "Vel prom":     r2(df_rec["vel_kmh"].mean()),
+            "Vel máx":      fmt(df_rec["vel_kmh"].max()),
+            "Vel prom":     fmt(df_rec["vel_kmh"].mean()),
             "Tiempo total": segundos_a_str(tiempo_track(df_rec)),
-            "_t":           tiempo_track(df_rec),
+            "_vel_max_f":   float(df_rec["vel_kmh"].max()),
+            "_t_f":         tiempo_track(df_rec),
             "color":        TRACK_COLORS[i % len(TRACK_COLORS)],
         })
     df_bench = pd.DataFrame(bench_rows)
-    ref_vel  = df_bench.loc[df_bench["Vel máx"].idxmax()]
-    ref_time = df_bench.loc[df_bench["_t"].idxmin()]
+    ref_vel_f  = df_bench["_vel_max_f"].max()
+    ref_time_f = df_bench["_t_f"].min()
+    ref_vel_r  = df_bench.loc[df_bench["_vel_max_f"].idxmax(), "Recorrido"]
+    ref_time_r = df_bench.loc[df_bench["_t_f"].idxmin(), "Recorrido"]
 
     col_b1, col_b2 = st.columns(2)
 
     with col_b1:
         st.markdown("#### Por velocidad máxima")
-        st.success(f"🥇 **{ref_vel['Recorrido']}** — {ref_vel['Vel máx']:.2f} km/h")
+        st.success(f"🥇 **{ref_vel_r}** — {fmt(ref_vel_f)} km/h")
         filas_vel = []
         for _, row in df_bench.iterrows():
-            diff = r2(row["Vel máx"] - ref_vel["Vel máx"])
+            diff = float(row["_vel_max_f"]) - ref_vel_f
             filas_vel.append({
                 "Recorrido": row["Recorrido"],
                 "Vel máx":   row["Vel máx"],
                 "Vel prom":  row["Vel prom"],
                 "Δ vs ref":  f"{diff:+.2f} km/h",
-                "_d":        diff,
             })
         df_vel = pd.DataFrame(filas_vel)
 
         def style_vel(row):
             styles = [""] * len(row)
-            d = row["_d"]
-            i = row.index.tolist().index("Δ vs ref")
-            styles[i] = (
-                "background-color:#1a4a1a" if d == 0
-                else "background-color:#4a3a0a" if d >= -3
-                else "background-color:#4a1a1a"
-            )
+            try:
+                d = float(row["Δ vs ref"].replace("+","").replace(" km/h",""))
+                i = row.index.tolist().index("Δ vs ref")
+                styles[i] = (
+                    "background-color:#1a4a1a" if d == 0
+                    else "background-color:#4a3a0a" if d >= -3
+                    else "background-color:#4a1a1a"
+                )
+            except:
+                pass
             return styles
 
         st.dataframe(
-            df_vel.drop(columns=["_d"])
-                  .style.apply(style_vel, axis=1)
-                  .hide(axis="index"),
+            df_vel.style.apply(style_vel, axis=1).hide(axis="index"),
             use_container_width=True
         )
 
     with col_b2:
         st.markdown("#### Por tiempo total")
-        st.success(f"🥇 **{ref_time['Recorrido']}** — {ref_time['Tiempo total']}")
+        st.success(f"🥇 **{ref_time_r}** — {segundos_a_str(ref_time_f)}")
         filas_time = []
         for _, row in df_bench.iterrows():
-            diff_s = r2(row["_t"] - ref_time["_t"])
+            diff_s = float(row["_t_f"]) - ref_time_f
             filas_time.append({
                 "Recorrido":    row["Recorrido"],
                 "Tiempo total": row["Tiempo total"],
                 "Δ vs ref":     f"{diff_s:+.2f} s",
-                "_d":           diff_s,
             })
         df_time = pd.DataFrame(filas_time)
 
         def style_time(row):
             styles = [""] * len(row)
-            d = row["_d"]
-            i = row.index.tolist().index("Δ vs ref")
-            styles[i] = (
-                "background-color:#1a4a1a" if d == 0
-                else "background-color:#4a3a0a" if d <= 1
-                else "background-color:#4a1a1a"
-            )
+            try:
+                d = float(row["Δ vs ref"].replace("+","").replace(" s",""))
+                i = row.index.tolist().index("Δ vs ref")
+                styles[i] = (
+                    "background-color:#1a4a1a" if d == 0
+                    else "background-color:#4a3a0a" if d <= 1
+                    else "background-color:#4a1a1a"
+                )
+            except:
+                pass
             return styles
 
         st.dataframe(
-            df_time.drop(columns=["_d"])
-                   .style.apply(style_time, axis=1)
-                   .hide(axis="index"),
+            df_time.style.apply(style_time, axis=1).hide(axis="index"),
             use_container_width=True
         )
 
@@ -553,35 +579,35 @@ if st.session_state.analizar and st.session_state.geocercas:
         filas_z = []
         for rec_nombre, df_seg in gc["segmentos"].items():
             tz     = tiempos_z[rec_nombre]
-            diff_z = r2(tz - ref_tz)
-            diff_v = r2(df_seg["vel_kmh"].max() - vel_max_zona) \
-                     if len(df_seg) else "-"
+            diff_z = tz - ref_tz
+            diff_v = float(df_seg["vel_kmh"].max()) - vel_max_zona \
+                     if len(df_seg) else None
             filas_z.append({
                 "Recorrido":   rec_nombre.replace(".csv",""),
                 "Tiempo zona": segundos_a_str(tz),
                 "Δ tiempo":    f"{diff_z:+.2f} s",
-                "Vel máx":     r2(df_seg["vel_kmh"].max()) if len(df_seg) else "-",
-                "Vel prom":    r2(df_seg["vel_kmh"].mean()) if len(df_seg) else "-",
-                "Δ vel máx":   f"{diff_v:+.2f} km/h" if diff_v != "-" else "-",
-                "_dz":         diff_z,
+                "Vel máx":     fmt(df_seg["vel_kmh"].max()) if len(df_seg) else "-",
+                "Vel prom":    fmt(df_seg["vel_kmh"].mean()) if len(df_seg) else "-",
+                "Δ vel máx":   f"{diff_v:+.2f} km/h" if diff_v is not None else "-",
             })
         df_zb = pd.DataFrame(filas_z)
 
         def style_zona(row):
             styles = [""] * len(row)
-            d = row["_dz"]
-            i = row.index.tolist().index("Δ tiempo")
-            styles[i] = (
-                "background-color:#1a4a1a" if d == 0
-                else "background-color:#4a3a0a" if d <= 0.5
-                else "background-color:#4a1a1a"
-            )
+            try:
+                d = float(row["Δ tiempo"].replace("+","").replace(" s",""))
+                i = row.index.tolist().index("Δ tiempo")
+                styles[i] = (
+                    "background-color:#1a4a1a" if d == 0
+                    else "background-color:#4a3a0a" if d <= 0.5
+                    else "background-color:#4a1a1a"
+                )
+            except:
+                pass
             return styles
 
         st.dataframe(
-            df_zb.drop(columns=["_dz"])
-                 .style.apply(style_zona, axis=1)
-                 .hide(axis="index"),
+            df_zb.style.apply(style_zona, axis=1).hide(axis="index"),
             use_container_width=True
         )
         st.markdown("---")
@@ -604,8 +630,8 @@ df_graf = recorridos_activos[rec_sel]
 col_a, col_b = st.columns(2)
 with col_a:
     for y, title, color in [
-        ("vel_kmh",   "Velocidad (km/h)",        "#378ADD"),
-        ("acel_mag",  "Aceleración (m/s²)",       "#EF9F27"),
+        ("vel_kmh",  "Velocidad (km/h)",  "#378ADD"),
+        ("acel_mag", "Aceleración (m/s²)","#EF9F27"),
     ]:
         fig = px.line(df_graf, x="time_str", y=y, title=title,
                       color_discrete_sequence=[color])
@@ -616,8 +642,8 @@ with col_a:
 
 with col_b:
     for y, title, color in [
-        ("elevation_m", "Altura (m)", "#1D9E75"),
-        ("inc_mag",     "Inclinación (°)", "#534AB7"),
+        ("elevation_m","Altura (m)",    "#1D9E75"),
+        ("inc_mag",    "Inclinación (°)","#534AB7"),
     ]:
         fig = px.area(df_graf, x="time_str", y=y, title=title,
                       color_discrete_sequence=[color])
