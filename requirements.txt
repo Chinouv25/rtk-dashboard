@@ -5,3 +5,5 @@ folium
 streamlit-folium
 numpy
 shapely
+gspread
+google-auth
