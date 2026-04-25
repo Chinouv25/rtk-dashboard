@@ -53,15 +53,22 @@ def load_csv(file_content, filename):
     df = pd.read_csv(io.BytesIO(file_content))
     df.columns = df.columns.str.strip().str.lower()
     df = df.rename(columns={
-        "latitude":  "lat", "longitude": "lon",
-        "speed_ms":  "vel_ms", "acc_x_ms2": "acel_x",
-        "acc_y_ms2": "acel_y", "inc_x_deg": "inc_x",
-        "inc_y_deg": "inc_y",
+        "latitude":      "lat",
+        "longitude":     "lon",
+        "speed_ms":      "vel_ms",
+        "acc_x_ms2":     "acel_x",
+        "acc_y_ms2":     "acel_y",
+        "inc_x_deg":     "inc_x",
+        "inc_y_deg":     "inc_y",
+        "jump_height_m": "jump_h",
     })
-    df["vel_kmh"]   = (df["vel_ms"] * 3.6).round(2)
-    df["acel_mag"]  = np.sqrt(df["acel_x"]**2 + df["acel_y"]**2).round(2)
-    df["inc_mag"]   = np.sqrt(df["inc_x"]**2  + df["inc_y"]**2).round(2)
-    df["time_str"]  = df["timestamp_s"].apply(segundos_a_str)
+    df["vel_kmh"]  = (df["vel_ms"] * 3.6).round(2)
+    df["acel_mag"] = np.sqrt(df["acel_x"]**2 + df["acel_y"]**2).round(2)
+    df["inc_mag"]  = np.sqrt(df["inc_x"]**2  + df["inc_y"]**2).round(2)
+    if "jump_h" not in df.columns:
+        df["jump_h"] = 0.0
+    df["jump_h"]   = df["jump_h"].round(2)
+    df["time_str"] = df["timestamp_s"].apply(segundos_a_str)
     df["recorrido"] = filename
     return df
 
@@ -84,7 +91,6 @@ def segmento_entre_lineas(df, linea_ini, linea_fin):
     return df.loc[idx_ini:idx_fin].copy()
 
 def val_to_color_custom(v, vmin, vmax, stops_rgb, stops_pos):
-    """Gradiente con 5 puntos de control personalizados."""
     t = max(0.0, min(1.0, (v - vmin) / (vmax - vmin + 1e-9)))
     for i in range(len(stops_pos)-1):
         t0, t1 = stops_pos[i], stops_pos[i+1]
@@ -112,15 +118,17 @@ with st.sidebar:
     st.divider()
     color_var = st.selectbox(
         "Colorear track por:",
-        ["vel_kmh","elevation_m","acel_mag","inc_mag"],
+        ["vel_kmh","jump_h","acel_mag","inc_mag"],
         format_func=lambda x: {
-            "vel_kmh":"Velocidad (km/h)","elevation_m":"Altura (m)",
-            "acel_mag":"Aceleración (m/s²)","inc_mag":"Inclinación (°)"
+            "vel_kmh":  "Velocidad (km/h)",
+            "jump_h":   "Saltos (m)",
+            "acel_mag": "Aceleración (m/s²)",
+            "inc_mag":  "Inclinación (°)"
         }[x]
     )
-    unit_map  = {"vel_kmh":"km/h","elevation_m":"m",
+    unit_map  = {"vel_kmh":"km/h","jump_h":"m",
                  "acel_mag":"m/s²","inc_mag":"°"}
-    label_map = {"vel_kmh":"Vel","elevation_m":"Alt",
+    label_map = {"vel_kmh":"Vel","jump_h":"Salto",
                  "acel_mag":"Acel","inc_mag":"Incl"}
 
     st.divider()
@@ -134,20 +142,21 @@ with st.sidebar:
             sc = st.color_picker(f"C{k+1}", default_colors[k],
                                  key=f"sc_{k}")
         with cv:
-            pct = st.number_input(f"% pos {k+1}",
-                                  0, 100,
-                                  int(st.session_state.escala[k]*100),
-                                  5, key=f"sv_{k}",
-                                  label_visibility="collapsed")
+            pct = st.number_input(
+                f"% pos {k+1}", 0, 100,
+                int(st.session_state.escala[k]*100),
+                5, key=f"sv_{k}",
+                label_visibility="collapsed"
+            )
             st.session_state.escala[k] = pct / 100.0
         stop_colors.append(sc)
         stop_vals.append(st.session_state.escala[k])
 
-    stop_vals  = sorted(stop_vals)
-    stops_rgb  = [hex_to_rgb(c) for c in stop_colors]
-    stops_pos  = stop_vals
+    stop_vals = sorted(stop_vals)
+    stops_rgb = [hex_to_rgb(c) for c in stop_colors]
+    stops_pos = stop_vals
 
-# Procesar archivos — sin cache
+# ── Procesar archivos sin cache ───────────────────────────
 nombres_subidos = {f.name for f in archivos} if archivos else set()
 for n in [n for n in st.session_state.recorridos if n not in nombres_subidos]:
     del st.session_state.recorridos[n]
@@ -194,6 +203,7 @@ for i, (nombre, df_rec) in enumerate(recorridos_activos.items()):
             unsafe_allow_html=True)
         st.metric("Vel. máx",      fmt(df_rec["vel_kmh"].max()) + " km/h")
         st.metric("Vel. promedio",  fmt(df_rec["vel_kmh"].mean()) + " km/h")
+        st.metric("Salto máx",      fmt(df_rec["jump_h"].max()) + " m")
         st.metric("Tiempo total",   segundos_a_str(tiempo_track(df_rec)))
 
 st.divider()
@@ -238,7 +248,7 @@ for rec_idx, (nombre, df_rec) in enumerate(recorridos_activos.items()):
                 f"<b>{rec_label}</b><br>"
                 f"T: {df_rec['time_str'].iloc[i]}<br>"
                 f"Vel: {df_rec['vel_kmh'].iloc[i]:.2f} km/h<br>"
-                f"Alt: {df_rec['elevation_m'].iloc[i]:.2f} m<br>"
+                f"Salto: {df_rec['jump_h'].iloc[i]:.2f} m<br>"
                 f"Acel: {df_rec['acel_mag'].iloc[i]:.2f} m/s²<br>"
                 f"Incl: {df_rec['inc_mag'].iloc[i]:.2f} °"
             )
@@ -295,7 +305,7 @@ for idx, gc in enumerate(st.session_state.geocercas):
             )
         ).add_to(m)
 
-# Leyenda con colores personalizados
+# Leyenda
 grad_stops = ", ".join([
     f"{stop_colors[i]} {int(stops_pos[i]*100)}%"
     for i in range(len(stop_colors))
@@ -449,13 +459,12 @@ if st.session_state.analizar and st.session_state.geocercas:
                 "Vel máx real":  fmt(vel_max) if len(df_seg) else "-",
                 "Vel mín real":  fmt(df_seg["vel_kmh"].min()) if len(df_seg) else "-",
                 "Vel prom real": fmt(df_seg["vel_kmh"].mean()) if len(df_seg) else "-",
+                "Salto máx":     fmt(df_seg["jump_h"].max()) if len(df_seg) else "-",
                 "Vel máx obj":   fmt(gc["vel_max_obj"]),
                 "Vel mín obj":   fmt(gc["vel_min_obj"]),
                 "_vel_max_f":    vel_max,
             })
-        # Ordenar por vel máx descendente
-        df_tabla = pd.DataFrame(filas).sort_values("_vel_max_f",
-                                                    ascending=False)
+        df_tabla = pd.DataFrame(filas).sort_values("_vel_max_f", ascending=False)
 
         def highlight_zona(row):
             styles = [""] * len(row)
@@ -494,6 +503,7 @@ if st.session_state.analizar and st.session_state.geocercas:
             "Recorrido":    nombre.replace(".csv",""),
             "Vel máx":      fmt(df_rec["vel_kmh"].max()),
             "Vel prom":     fmt(df_rec["vel_kmh"].mean()),
+            "Salto máx":    fmt(df_rec["jump_h"].max()),
             "Tiempo total": segundos_a_str(tiempo_track(df_rec)),
             "_vel_f":       float(df_rec["vel_kmh"].max()),
             "_t_f":         tiempo_track(df_rec),
@@ -517,6 +527,7 @@ if st.session_state.analizar and st.session_state.geocercas:
                 "Recorrido": row["Recorrido"],
                 "Vel máx":   row["Vel máx"],
                 "Vel prom":  row["Vel prom"],
+                "Salto máx": row["Salto máx"],
                 "Δ vs ref":  f"{diff:+.2f} km/h",
             })
         df_vel = pd.DataFrame(filas_vel)
@@ -572,7 +583,7 @@ if st.session_state.analizar and st.session_state.geocercas:
             use_container_width=True
         )
 
-    # Benchmark por zonas — ordenado por tiempo asc
+    # Benchmark por zonas
     st.markdown("#### Benchmark por zona")
     for gc in st.session_state.geocercas:
         st.markdown(f"**{gc['nombre']}**")
@@ -594,6 +605,7 @@ if st.session_state.analizar and st.session_state.geocercas:
                 "Δ tiempo":    f"{diff_z:+.2f} s",
                 "Vel máx":     fmt(df_seg["vel_kmh"].max()) if len(df_seg) else "-",
                 "Vel prom":    fmt(df_seg["vel_kmh"].mean()) if len(df_seg) else "-",
+                "Salto máx":   fmt(df_seg["jump_h"].max()) if len(df_seg) else "-",
                 "Δ vel máx":   f"{diff_v:+.2f} km/h" if diff_v is not None else "-",
                 "_tz_f":       tz,
             })
@@ -639,8 +651,8 @@ df_graf = recorridos_activos[rec_sel]
 col_a, col_b = st.columns(2)
 with col_a:
     for y, title, color in [
-        ("vel_kmh",  "Velocidad (km/h)",  "#378ADD"),
-        ("acel_mag", "Aceleración (m/s²)","#EF9F27"),
+        ("vel_kmh",  "Velocidad (km/h)",   "#378ADD"),
+        ("acel_mag", "Aceleración (m/s²)", "#EF9F27"),
     ]:
         fig = px.line(df_graf, x="time_str", y=y, title=title,
                       color_discrete_sequence=[color])
@@ -651,8 +663,8 @@ with col_a:
 
 with col_b:
     for y, title, color in [
-        ("elevation_m","Altura (m)",    "#1D9E75"),
-        ("inc_mag",    "Inclinación (°)","#534AB7"),
+        ("jump_h",  "Saltos (m)",       "#1D9E75"),
+        ("inc_mag", "Inclinación (°)",  "#534AB7"),
     ]:
         fig = px.area(df_graf, x="time_str", y=y, title=title,
                       color_discrete_sequence=[color])
@@ -664,10 +676,10 @@ with col_b:
 st.divider()
 with st.expander("Ver datos procesados"):
     st.dataframe(
-        df_graf[["time_str","lat","lon","elevation_m",
+        df_graf[["time_str","lat","lon","jump_h",
                  "vel_kmh","acel_x","acel_y","inc_x","inc_y"]].rename(columns={
             "time_str":"Tiempo","lat":"Latitud","lon":"Longitud",
-            "elevation_m":"Altura (m)","vel_kmh":"Vel (km/h)",
+            "jump_h":"Salto (m)","vel_kmh":"Vel (km/h)",
             "acel_x":"Acel X","acel_y":"Acel Y",
             "inc_x":"Inc X (°)","inc_y":"Inc Y (°)",
         }).style.hide(axis="index"),
