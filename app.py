@@ -29,14 +29,27 @@ SCOPES     = ["https://www.googleapis.com/auth/spreadsheets",
                "https://www.googleapis.com/auth/drive"]
 
 @st.cache_resource
+@st.cache_resource
 def get_gsheet():
     try:
         if os.path.exists("credentials.json"):
             creds = Credentials.from_service_account_file(
                 "credentials.json", scopes=SCOPES)
         else:
-            creds = Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"], scopes=SCOPES)
+            info = {
+                "type":                        st.secrets["gcp_service_account"]["type"],
+                "project_id":                  st.secrets["gcp_service_account"]["project_id"],
+                "private_key_id":              st.secrets["gcp_service_account"]["private_key_id"],
+                "private_key":                 st.secrets["gcp_service_account"]["private_key"],
+                "client_email":                st.secrets["gcp_service_account"]["client_email"],
+                "client_id":                   st.secrets["gcp_service_account"]["client_id"],
+                "auth_uri":                    st.secrets["gcp_service_account"]["auth_uri"],
+                "token_uri":                   st.secrets["gcp_service_account"]["token_uri"],
+                "auth_provider_x509_cert_url": st.secrets["gcp_service_account"]["auth_provider_x509_cert_url"],
+                "client_x509_cert_url":        st.secrets["gcp_service_account"]["client_x509_cert_url"],
+                "universe_domain":             st.secrets["gcp_service_account"].get("universe_domain","googleapis.com"),
+            }
+            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         gc = gspread.authorize(creds)
         return gc.open_by_key(SHEET_ID)
     except Exception as e:
